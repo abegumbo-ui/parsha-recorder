@@ -151,6 +151,7 @@ public class MainActivity extends Activity {
             requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
         else syncMirrorsAsync();
         checkForUpdate(false);
+        recordNowIfAsked(getIntent(), b == null);
     }
 
     @Override
@@ -320,13 +321,19 @@ public class MainActivity extends Activity {
         m.getMenu().add(0, 1, 0, "Back up everything…");
         m.getMenu().add(0, 2, 1, "Restore from a backup…");
         m.getMenu().add(0, 3, 2, israel ? "Calendar: Israel (tap for Diaspora)" : "Calendar: Diaspora (tap for Israel)");
-        m.getMenu().add(0, 5, 3, "Check for updates");
-        m.getMenu().add(0, 4, 4, lib.total() + " recordings  ·  v" + versionName()).setEnabled(false);
+        m.getMenu().add(0, 6, 3, prefs.getBoolean("autoRecord", false)
+                ? "Record as soon as the app opens: ON" : "Record as soon as the app opens: off");
+        m.getMenu().add(0, 5, 4, "Check for updates");
+        m.getMenu().add(0, 4, 5, lib.total() + " recordings  ·  v" + versionName()).setEnabled(false);
         m.setOnMenuItemClickListener(i -> {
             switch (i.getItemId()) {
                 case 1: startBackup(); break;
                 case 2: startRestore(); break;
                 case 5: checkForUpdate(true); break;
+                case 6:
+                    prefs.edit().putBoolean("autoRecord", !prefs.getBoolean("autoRecord", false)).apply();
+                    toast(prefs.getBoolean("autoRecord", false) ? "The app will start recording this week's Parsha as soon as it opens." : "Auto-record off.");
+                    break;
                 case 3:
                     israel = !israel;
                     prefs.edit().putBoolean("israel", israel).apply();
@@ -345,6 +352,31 @@ public class MainActivity extends Activity {
         if (!p.remove(key)) p.add(key);
         prefs.edit().putStringSet("pins", p).apply();
         showHome();
+    }
+
+    /** Folder for "right now": this week's Parsha, else the holiday in progress, else General. */
+    private String currentFolderKey() {
+        Calendar probe = Calendar.getInstance();
+        for (int i = 0; i < 3; i++) {
+            String k = Catalog.parshaKeyForWeek(probe, israel);
+            if (k != null) return k;
+            probe.add(Calendar.DAY_OF_MONTH, 7);
+        }
+        Object[] hol = Catalog.upcomingHoliday(Calendar.getInstance(), israel, 7);
+        return hol != null ? (String) hol[0] : "g_general";
+    }
+
+    private void recordNowIfAsked(Intent i, boolean freshLaunch) {
+        if (recorder != null || screen == Screen.REVIEW) return;
+        boolean shortcut = i != null && "com.parsharec.RECORD_NOW".equals(i.getAction());
+        if (shortcut || (freshLaunch && prefs.getBoolean("autoRecord", false))) startRecording(currentFolderKey());
+    }
+
+    @Override
+    protected void onNewIntent(Intent i) {
+        super.onNewIntent(i);
+        setIntent(i);
+        recordNowIfAsked(i, false);
     }
 
     private void showHome() {
