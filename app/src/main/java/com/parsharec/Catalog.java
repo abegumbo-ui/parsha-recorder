@@ -169,4 +169,16 @@ public final class Catalog {
         }
         return null;
     }
+
+    /** Folder for "right now": this week's Parsha, else the holiday in progress or imminent, else General. */
+    public static String currentKey(boolean israel) {
+        Calendar probe = Calendar.getInstance();
+        for (int i = 0; i < 3; i++) {
+            String k = parshaKeyForWeek(probe, israel);
+            if (k != null) return k;
+            probe.add(Calendar.DAY_OF_MONTH, 7);
+        }
+        Object[] hol = upcomingHoliday(Calendar.getInstance(), israel, 7);
+        return hol != null ? (String) hol[0] : "g_general";
+    }
 }

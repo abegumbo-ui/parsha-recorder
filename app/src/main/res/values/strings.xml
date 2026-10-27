@@ -2,4 +2,5 @@
 <resources>
     <string name="shortcut_record_short">Record now</string>
     <string name="shortcut_record_long">Record the current Parsha</string>
+    <string name="widget_description">One tap to record into this week\u0027s Parsha</string>
 </resources>

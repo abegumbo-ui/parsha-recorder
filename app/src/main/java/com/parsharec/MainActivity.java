@@ -166,6 +166,7 @@ public class MainActivity extends Activity {
         super.onResume();
         // A new day may have started (new week, new Parsha) while the app sat in the background.
         if (screen == Screen.HOME) render();
+        RecordWidget.refreshAll(this);
     }
 
     @Override
@@ -354,22 +355,10 @@ public class MainActivity extends Activity {
         showHome();
     }
 
-    /** Folder for "right now": this week's Parsha, else the holiday in progress, else General. */
-    private String currentFolderKey() {
-        Calendar probe = Calendar.getInstance();
-        for (int i = 0; i < 3; i++) {
-            String k = Catalog.parshaKeyForWeek(probe, israel);
-            if (k != null) return k;
-            probe.add(Calendar.DAY_OF_MONTH, 7);
-        }
-        Object[] hol = Catalog.upcomingHoliday(Calendar.getInstance(), israel, 7);
-        return hol != null ? (String) hol[0] : "g_general";
-    }
-
     private void recordNowIfAsked(Intent i, boolean freshLaunch) {
         if (recorder != null || screen == Screen.REVIEW) return;
         boolean shortcut = i != null && "com.parsharec.RECORD_NOW".equals(i.getAction());
-        if (shortcut || (freshLaunch && prefs.getBoolean("autoRecord", false))) startRecording(currentFolderKey());
+        if (shortcut || (freshLaunch && prefs.getBoolean("autoRecord", false))) startRecording(Catalog.currentKey(israel));
     }
 
     @Override
