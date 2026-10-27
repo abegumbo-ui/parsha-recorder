@@ -3,7 +3,11 @@ package com.parsharec;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.pm.PackageInstaller;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
@@ -56,7 +60,7 @@ import java.util.Set;
 public class MainActivity extends Activity {
     private static final int C_BG = 0xFFF7F3EA, C_CARD = 0xFFFFFFFF, C_INK = 0xFF1E2A3A, C_SUB = 0xFF6B7685,
             C_ACCENT = 0xFF23406B, C_RED = 0xFFD93025, C_LINE = 0xFFE4DDCC, C_SOFT = 0xFFEAF0F8;
-    private static final int REQ_MIC = 1, REQ_BACKUP = 2, REQ_RESTORE = 3, REQ_COPY = 4;
+    private static final int REQ_MIC = 1, REQ_BACKUP = 2, REQ_RESTORE = 3, REQ_COPY = 4, REQ_STORAGE = 5;
 
     private enum Screen { HOME, CALENDAR, FOLDER, RECORDING, REVIEW }
 
@@ -138,6 +142,15 @@ public class MainActivity extends Activity {
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         render();
         ui.post(tick);
+
+        IntentFilter filt = new IntentFilter(Updater.ACTION_RESULT);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(installResult, filt, RECEIVER_NOT_EXPORTED);
+        else registerReceiver(installResult, filt);
+
+        if (Build.VERSION.SDK_INT < 29 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
+        else syncMirrorsAsync();
+        checkForUpdate(false);
     }
 
     @Override
@@ -171,6 +184,7 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         ui.removeCallbacksAndMessages(null);
         stopPlayback();
+        try { unregisterReceiver(installResult); } catch (RuntimeException ignored) {}
         super.onDestroy();
     }
 
@@ -306,11 +320,13 @@ public class MainActivity extends Activity {
         m.getMenu().add(0, 1, 0, "Back up everything…");
         m.getMenu().add(0, 2, 1, "Restore from a backup…");
         m.getMenu().add(0, 3, 2, israel ? "Calendar: Israel (tap for Diaspora)" : "Calendar: Diaspora (tap for Israel)");
-        m.getMenu().add(0, 4, 3, lib.total() + " recordings saved").setEnabled(false);
+        m.getMenu().add(0, 5, 3, "Check for updates");
+        m.getMenu().add(0, 4, 4, lib.total() + " recordings  ·  v" + versionName()).setEnabled(false);
         m.setOnMenuItemClickListener(i -> {
             switch (i.getItemId()) {
                 case 1: startBackup(); break;
                 case 2: startRestore(); break;
+                case 5: checkForUpdate(true); break;
                 case 3:
                     israel = !israel;
                     prefs.edit().putBoolean("israel", israel).apply();
@@ -766,6 +782,7 @@ public class MainActivity extends Activity {
 
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] res) {
+        if (code == REQ_STORAGE) syncMirrorsAsync();
         if (code == REQ_MIC) {
             if (res.length > 0 && res[0] == PackageManager.PERMISSION_GRANTED && pendingFolder != null) startRecording(pendingFolder);
             else toast("Microphone permission is needed to record.");
@@ -966,6 +983,7 @@ public class MainActivity extends Activity {
         if (title == null && titleEdit != null && titleEdit.getParent() != null) title = titleEdit.getText().toString().trim();
         curRec.title = title == null ? "" : title;
         lib.commit(curRec);
+        syncMirrorsAsync();
         toast("Saved to " + Catalog.title(curRec.folder));
         curRec = null;
         titleEdit = null;
@@ -1046,6 +1064,7 @@ public class MainActivity extends Activity {
             new Thread(() -> {
                 try (InputStream is = getContentResolver().openInputStream(uri)) {
                     int n = lib.restore(is);
+                    lib.syncMirrors();
                     ui.post(() -> { toast(n == 0 ? "Nothing new to restore." : "Restored " + n + " recordings."); render(); });
                 } catch (Exception e) {
                     ui.post(() -> toast("Restore failed: " + e.getMessage()));
@@ -1064,5 +1083,62 @@ public class MainActivity extends Activity {
                 }
             }).start();
         }
+    }
+
+    // ------------------------------------------------------------------ file-manager copy + updates
+
+    private void syncMirrorsAsync() { new Thread(lib::syncMirrors).start(); }
+
+    private String versionName() {
+        try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { return "?"; }
+    }
+
+    private final BroadcastReceiver installResult = new BroadcastReceiver() {
+        @Override public void onReceive(Context c, Intent i) {
+            int status = i.getIntExtra(PackageInstaller.EXTRA_STATUS, -1);
+            if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                Intent confirm = i.getParcelableExtra(Intent.EXTRA_INTENT);
+                if (confirm != null) startActivity(confirm);
+            } else if (status != PackageInstaller.STATUS_SUCCESS) {
+                toast("Update did not install: " + i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE));
+            }
+        }
+    };
+
+    /** Looks for a newer GitHub release. {@code manual} also reports "up to date" and errors. */
+    private void checkForUpdate(boolean manual) {
+        if (manual) toast("Checking for updates…");
+        new Thread(() -> {
+            try {
+                Updater.Info info = Updater.check(versionName());
+                ui.post(() -> {
+                    if (info == null) { if (manual) toast("You have the latest version (" + versionName() + ")."); }
+                    else offerUpdate(info);
+                });
+            } catch (Exception e) {
+                if (manual) ui.post(() -> toast("Could not check for updates: " + e.getMessage()));
+            }
+        }).start();
+    }
+
+    private void offerUpdate(Updater.Info info) {
+        if (isFinishing()) return;
+        String notes = info.notes.isEmpty() ? "" : "\n\n" + info.notes;
+        new AlertDialog.Builder(this).setTitle("Update available: " + info.version)
+                .setMessage("You have " + versionName() + "." + notes)
+                .setPositiveButton("Update now", (d, w) -> {
+                    toast("Downloading…");
+                    new Thread(() -> {
+                        try {
+                            File apk = Updater.download(this, info);
+                            ui.post(() -> {
+                                try { Updater.install(this, apk); } catch (Exception e) { toast("Could not start the install: " + e.getMessage()); }
+                            });
+                        } catch (Exception e) {
+                            ui.post(() -> toast("Download failed: " + e.getMessage()));
+                        }
+                    }).start();
+                })
+                .setNegativeButton("Later", null).show();
     }
 }

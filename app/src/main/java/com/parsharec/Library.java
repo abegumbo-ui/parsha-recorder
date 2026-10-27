@@ -29,16 +29,18 @@ import java.util.zip.ZipOutputStream;
 /** Recording index (one small JSON file) plus the audio files; handles backup and restore as a single zip. */
 public final class Library {
     public static final class Rec {
-        public String id, folder, title;
+        public String id, folder, title, mirror = "";
         public long createdMs, durationMs;
     }
 
     private static final Pattern AUDIO_ENTRY = Pattern.compile("audio/[0-9a-fA-F-]{36}\\.m4a");
 
+    private final android.content.Context ctx;
     private final File root, audioDir, index;
     private final List<Rec> recs = new ArrayList<>();
 
-    public Library(Context ctx) {
+    public Library(Context context) {
+        ctx = context.getApplicationContext();
         File base = ctx.getExternalFilesDir(null);
         if (base == null) base = ctx.getFilesDir();
         root = new File(base, "recordings");
@@ -79,16 +81,45 @@ public final class Library {
 
     public synchronized int total() { return recs.size(); }
 
-    public synchronized void rename(Rec r, String title) { r.title = title; save(); }
+    public synchronized void rename(Rec r, String title) { r.title = title; remirror(r); save(); }
 
-    public synchronized void move(Rec r, String folder) { r.folder = folder; save(); }
+    public synchronized void move(Rec r, String folder) { r.folder = folder; remirror(r); save(); }
 
     public synchronized void delete(Rec r) {
         recs.remove(r);
+        if (r.mirror != null && !r.mirror.isEmpty()) Mirror.delete(ctx, r.mirror);
         audioFile(r.id).delete();
         save();
     }
 
+    // ---- visible copy in Music/Parsha Recorder/<folder>/ ----
+
+    private String displayName(Rec r) {
+        if (r.title != null && !r.title.trim().isEmpty()) return r.title;
+        return new java.text.SimpleDateFormat("yyyy-MM-dd HH.mm", java.util.Locale.US).format(new java.util.Date(r.createdMs));
+    }
+
+    private void remirror(Rec r) {
+        if (r.mirror == null || r.mirror.isEmpty()) return;
+        r.mirror = Mirror.update(ctx, r.mirror, Catalog.title(r.folder), displayName(r));
+    }
+
+    /** Creates the file-manager copy for every recording that lacks one. Safe to call repeatedly; run off the main thread. */
+    public synchronized void syncMirrors() {
+        boolean changed = false;
+        for (Rec r : recs) {
+            if (r.mirror != null && !r.mirror.isEmpty()) continue;
+            File f = audioFile(r.id);
+            if (!f.exists()) continue;
+            try {
+                r.mirror = Mirror.create(ctx, f, Catalog.title(r.folder), displayName(r));
+                changed = true;
+            } catch (IOException | RuntimeException e) {
+                // Most likely storage permission on old Android; try again next launch.
+            }
+        }
+        if (changed) save();
+    }
     // ---- persistence ----
 
     private void load() {
@@ -123,6 +154,7 @@ public final class Library {
             r.title = o.optString("title", "");
             r.createdMs = o.optLong("created");
             r.durationMs = o.optLong("duration");
+            r.mirror = o.optString("mirror", "");
             out.add(r);
         }
         return out;
@@ -133,7 +165,7 @@ public final class Library {
             JSONArray a = new JSONArray();
             for (Rec r : recs) {
                 a.put(new JSONObject().put("id", r.id).put("folder", r.folder).put("title", r.title == null ? "" : r.title)
-                        .put("created", r.createdMs).put("duration", r.durationMs));
+                        .put("created", r.createdMs).put("duration", r.durationMs).put("mirror", r.mirror == null ? "" : r.mirror));
             }
             return new JSONObject().put("version", 1).put("recordings", a).toString(1).getBytes(java.nio.charset.StandardCharsets.UTF_8);
         } catch (JSONException e) {
@@ -216,6 +248,7 @@ public final class Library {
         for (Rec r : incoming) {
             if (have.contains(r.id) || !got.contains(r.id)) continue;
             if (!new File(stage, r.id + ".m4a").renameTo(audioFile(r.id))) continue;
+            r.mirror = "";
             recs.add(r);
             added++;
         }
