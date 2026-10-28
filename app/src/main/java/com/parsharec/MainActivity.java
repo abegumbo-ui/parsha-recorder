@@ -955,8 +955,8 @@ public class MainActivity extends Activity {
         top.addView(play, lp(dp(52), dp(52), 0, 4, 0, 10, 0));
 
         LinearLayout info = vbox();
-        TextView t = text(titleOf(r), 16, C_INK, true);
-        t.setMaxLines(2);
+        TextView t = text(titleOf(r) + "  ·  " + Catalog.location(r.folder), 16, C_INK, true);
+        t.setMaxLines(3);
         info.addView(t);
         info.addView(text(DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(new Date(r.createdMs)) + "  ·  " + fmt(r.durationMs), 13, C_SUB, false));
         top.addView(info, lp(0, -2, 1, 0, 0, 4, 0));
@@ -1328,7 +1328,7 @@ public class MainActivity extends Activity {
         curRec.named = !curRec.title.isEmpty();
         lib.commit(curRec);
         syncMirrorsAsync();
-        toast("Saved to " + Catalog.title(curRec.folder) + " as " + (curRec.named ? curRec.title : "number 1"));
+        toast("Saved to " + Catalog.title(curRec.folder) + " as " + (curRec.named ? curRec.title : "number " + lib.numberOf(curRec)));
         curRec = null;
         titleEdit = null;
         leaveRecording();

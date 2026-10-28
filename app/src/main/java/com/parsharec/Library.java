@@ -89,12 +89,12 @@ public final class Library {
         save();
     }
 
-    /** Position in its folder, newest first: the newest recording is 1, the one before it 2, and so on. */
+    /** Position in its folder, oldest first: the oldest recording is 1 and the newest has the highest number. */
     public synchronized int numberOf(Rec r) {
         int n = 1;
         for (Rec x : recs) {
             if (x == r || !x.folder.equals(r.folder)) continue;
-            if (x.createdMs > r.createdMs || (x.createdMs == r.createdMs && x.id.compareTo(r.id) > 0)) n++;
+            if (x.createdMs < r.createdMs || (x.createdMs == r.createdMs && x.id.compareTo(r.id) < 0)) n++;
         }
         return n;
     }
@@ -111,8 +111,10 @@ public final class Library {
     // ---- visible copy in Music/Parsha Recorder/<folder>/ ----
 
     private String displayName(Rec r) {
-        if (r.named && r.title != null && !r.title.trim().isEmpty()) return r.title;
-        return String.valueOf(numberOf(r));
+        // "010 - 2026-10-27 15.42 - Chumash Bereishis - Vayeira": number (or chosen name), when, and where it belongs.
+        String first = r.named && r.title != null && !r.title.trim().isEmpty() ? r.title : String.format(java.util.Locale.US, "%03d", numberOf(r));
+        String when = new java.text.SimpleDateFormat("yyyy-MM-dd HH.mm", java.util.Locale.US).format(new java.util.Date(r.createdMs));
+        return first + " - " + when + " - " + Catalog.location(r.folder);
     }
 
     /** Where and under what name the visible copy should be right now. */

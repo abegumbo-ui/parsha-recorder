@@ -176,6 +176,20 @@ public final class Catalog {
         return null;
     }
 
+    /** Human-readable place a folder belongs to, e.g. "Chumash Bereishis - Vayeira" or "Gemara - Berachos - Daf 5". */
+    public static String location(String key) {
+        Folder f = getOrGeneral(key);
+        String cat = category(f.key);
+        if (CAT_PARSHA.equals(cat)) return "Chumash " + f.section + " - " + f.en;
+        if (CAT_YOMTOV.equals(cat)) return "Yom Tov - " + f.en;
+        if (CAT_GEMARA.equals(cat)) {
+            Masechta m = masechta(masechtaOf(f.key));
+            String[] p = f.key.split("_");
+            return "Gemara - " + (m == null ? "" : m.en) + " - Daf " + p[2];
+        }
+        return f.en;
+    }
+
     /** Masechta index for a daf key, or -1. */
     public static int masechtaOf(String key) {
         if (key == null || !key.startsWith("d_")) return -1;
