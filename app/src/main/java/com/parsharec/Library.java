@@ -29,7 +29,9 @@ import java.util.zip.ZipOutputStream;
 /** Recording index (one small JSON file) plus the audio files; handles backup and restore as a single zip. */
 public final class Library {
     public static final class Rec {
-        public String id, folder, title, mirror = "";
+        public String id, folder, title, mirror = "", mirrorName = "";
+        /** True when the user typed a name; otherwise the recording is called by its number (newest = 1). */
+        public boolean named;
         public long createdMs, durationMs;
     }
 
@@ -81,9 +83,23 @@ public final class Library {
 
     public synchronized int total() { return recs.size(); }
 
-    public synchronized void rename(Rec r, String title) { r.title = title; remirror(r); save(); }
+    public synchronized void rename(Rec r, String title) {
+        r.title = title == null ? "" : title.trim();
+        r.named = !r.title.isEmpty();
+        save();
+    }
 
-    public synchronized void move(Rec r, String folder) { r.folder = folder; remirror(r); save(); }
+    /** Position in its folder, newest first: the newest recording is 1, the one before it 2, and so on. */
+    public synchronized int numberOf(Rec r) {
+        int n = 1;
+        for (Rec x : recs) {
+            if (x == r || !x.folder.equals(r.folder)) continue;
+            if (x.createdMs > r.createdMs || (x.createdMs == r.createdMs && x.id.compareTo(r.id) > 0)) n++;
+        }
+        return n;
+    }
+
+    public synchronized void move(Rec r, String folder) { r.folder = folder; save(); }
 
     public synchronized void delete(Rec r) {
         recs.remove(r);
@@ -95,37 +111,43 @@ public final class Library {
     // ---- visible copy in Music/Parsha Recorder/<folder>/ ----
 
     private String displayName(Rec r) {
-        if (r.title != null && !r.title.trim().isEmpty()) return r.title;
-        return new java.text.SimpleDateFormat("yyyy-MM-dd HH.mm", java.util.Locale.US).format(new java.util.Date(r.createdMs));
+        if (r.named && r.title != null && !r.title.trim().isEmpty()) return r.title;
+        return String.valueOf(numberOf(r));
     }
 
-    private void remirror(Rec r) {
-        if (r.mirror == null || r.mirror.isEmpty()) return;
-        r.mirror = Mirror.update(ctx, r.mirror, Catalog.path(r.folder), displayName(r));
-    }
+    /** Where and under what name the visible copy should be right now. */
+    private String wantKey(Rec r) { return Catalog.path(r.folder) + "|" + displayName(r); }
 
-    /** Creates the file-manager copy for every recording that lacks one. Safe to call repeatedly; run off the main thread. */
+    /**
+     * Brings the file-manager copies in line with the library: creates missing ones, and renames/moves the rest so their
+     * names follow the numbering (newest = 1). Safe to call repeatedly; run off the main thread.
+     */
     public synchronized void syncMirrors() {
         boolean changed = false;
-        // One-time move of copies made by 1.1-1.3 (Music/Parsha Recorder/<name>) into the new Parsha/Yom Tov/Gemara layout.
-        android.content.SharedPreferences sp = ctx.getSharedPreferences("prefs", Context.MODE_PRIVATE);
-        if (sp.getInt("mirrorLayout", 1) < 2) {
-            for (Rec r : recs) if (r.mirror != null && !r.mirror.isEmpty()) { remirror(r); changed = true; }
-            sp.edit().putInt("mirrorLayout", 2).apply();
-        }
         for (Rec r : recs) {
             if (r.mirror != null && !r.mirror.isEmpty()) continue;
             File f = audioFile(r.id);
             if (!f.exists()) continue;
             try {
                 r.mirror = Mirror.create(ctx, f, Catalog.path(r.folder), displayName(r));
+                r.mirrorName = wantKey(r);
                 changed = true;
             } catch (IOException | RuntimeException e) {
                 // Most likely storage permission on old Android; try again next launch.
             }
         }
+        // Two passes so renumbering never collides ("2" -> "3" while a "3" still exists).
+        List<Rec> drift = new ArrayList<>();
+        for (Rec r : recs) if (r.mirror != null && !r.mirror.isEmpty() && !wantKey(r).equals(r.mirrorName)) drift.add(r);
+        for (Rec r : drift) r.mirror = Mirror.update(ctx, r.mirror, Catalog.path(r.folder), "~" + r.id.substring(0, 8));
+        for (Rec r : drift) {
+            r.mirror = Mirror.update(ctx, r.mirror, Catalog.path(r.folder), displayName(r));
+            r.mirrorName = wantKey(r);
+            changed = true;
+        }
         if (changed) save();
     }
+
     // ---- persistence ----
 
     private void load() {
@@ -144,6 +166,7 @@ public final class Library {
                 r.folder = "g_general";
                 r.createdMs = f.lastModified();
                 r.title = "Recovered recording";
+                r.named = true;
                 recs.add(r);
             }
         }
@@ -161,6 +184,10 @@ public final class Library {
             r.createdMs = o.optLong("created");
             r.durationMs = o.optLong("duration");
             r.mirror = o.optString("mirror", "");
+            r.mirrorName = o.optString("mname", "");
+            // Older versions saved the date as the title; those count as unnamed and become numbers.
+            String oldDefault = new java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault()).format(new java.util.Date(r.createdMs));
+            r.named = o.has("named") ? o.optBoolean("named") : (!r.title.trim().isEmpty() && !r.title.equals(oldDefault));
             out.add(r);
         }
         return out;
@@ -171,7 +198,8 @@ public final class Library {
             JSONArray a = new JSONArray();
             for (Rec r : recs) {
                 a.put(new JSONObject().put("id", r.id).put("folder", r.folder).put("title", r.title == null ? "" : r.title)
-                        .put("created", r.createdMs).put("duration", r.durationMs).put("mirror", r.mirror == null ? "" : r.mirror));
+                        .put("created", r.createdMs).put("duration", r.durationMs).put("mirror", r.mirror == null ? "" : r.mirror)
+                        .put("mname", r.mirrorName == null ? "" : r.mirrorName).put("named", r.named));
             }
             return new JSONObject().put("version", 1).put("recordings", a).toString(1).getBytes(java.nio.charset.StandardCharsets.UTF_8);
         } catch (JSONException e) {
@@ -255,6 +283,7 @@ public final class Library {
             if (have.contains(r.id) || !got.contains(r.id)) continue;
             if (!new File(stage, r.id + ".m4a").renameTo(audioFile(r.id))) continue;
             r.mirror = "";
+            r.mirrorName = "";
             recs.add(r);
             added++;
         }

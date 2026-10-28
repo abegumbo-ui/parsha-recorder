@@ -994,8 +994,8 @@ public class MainActivity extends Activity {
     }
 
     private String titleOf(Library.Rec r) {
-        if (r.title != null && !r.title.trim().isEmpty()) return r.title;
-        return new SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(new Date(r.createdMs));
+        if (r.named && r.title != null && !r.title.trim().isEmpty()) return r.title;
+        return String.valueOf(lib.numberOf(r));
     }
 
     private void rowMenu(View anchor, Library.Rec r) {
@@ -1006,12 +1006,12 @@ public class MainActivity extends Activity {
         m.getMenu().add(0, 4, 3, "Delete");
         m.setOnMenuItemClickListener(i -> {
             switch (i.getItemId()) {
-                case 1: askText("Rename", titleOf(r), s -> { lib.rename(r, s); render(); }); break;
-                case 2: pickFolder("Move to…", k -> { stopPlayback(); lib.move(r, k); render(); toast("Moved to " + Catalog.title(k)); }); break;
+                case 1: askText("Name (leave empty for its number)", r.named ? r.title : "", s -> { lib.rename(r, s); render(); syncMirrorsAsync(); }); break;
+                case 2: pickFolder("Move to…", k -> { stopPlayback(); lib.move(r, k); render(); syncMirrorsAsync(); toast("Moved to " + Catalog.title(k)); }); break;
                 case 3: startCopy(r); break;
                 case 4:
                     new AlertDialog.Builder(this).setTitle("Delete this recording?").setMessage(titleOf(r))
-                            .setPositiveButton("Delete", (d, w) -> { stopPlayback(); lib.delete(r); render(); })
+                            .setPositiveButton("Delete", (d, w) -> { stopPlayback(); lib.delete(r); render(); syncMirrorsAsync(); })
                             .setNegativeButton("Keep", null).show();
                     break;
             }
@@ -1261,8 +1261,8 @@ public class MainActivity extends Activity {
         page.addView(change);
 
         titleEdit = new EditText(this);
-        titleEdit.setHint("Title (optional)");
-        titleEdit.setText(keepTitle != null ? keepTitle : new SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(new Date(curRec.createdMs)));
+        titleEdit.setHint("Name (optional) — otherwise it is saved as the next number");
+        titleEdit.setText(keepTitle != null ? keepTitle : "");
         titleEdit.setSingleLine(true);
         titleEdit.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         page.addView(titleEdit, lp(-1, -2, 0, 0, 0, 0, 14));
@@ -1325,9 +1325,10 @@ public class MainActivity extends Activity {
         stopPlayback();
         if (title == null && titleEdit != null && titleEdit.getParent() != null) title = titleEdit.getText().toString().trim();
         curRec.title = title == null ? "" : title;
+        curRec.named = !curRec.title.isEmpty();
         lib.commit(curRec);
         syncMirrorsAsync();
-        toast("Saved to " + Catalog.title(curRec.folder));
+        toast("Saved to " + Catalog.title(curRec.folder) + " as " + (curRec.named ? curRec.title : "number 1"));
         curRec = null;
         titleEdit = null;
         leaveRecording();
@@ -1384,7 +1385,7 @@ public class MainActivity extends Activity {
     private void startCopy(Library.Rec r) {
         copyRec = r;
         Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("audio/mp4");
-        i.putExtra(Intent.EXTRA_TITLE, titleOf(r).replaceAll("[\\\\/:*?\"<>|]", "-") + ".m4a");
+        i.putExtra(Intent.EXTRA_TITLE, (Catalog.title(r.folder) + " " + titleOf(r)).replaceAll("[\\\\/:*?\"<>|]", "-") + ".m4a");
         startActivityForResult(i, REQ_COPY);
     }
 
