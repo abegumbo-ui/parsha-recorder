@@ -125,7 +125,7 @@ public class MainActivity extends Activity {
     // app lock
     private AppLock lock;
     private FrameLayout outer, lockLayer;
-    private boolean locked, externalUi, pendingRecord;
+    private boolean unlocked, externalUi;   // unlocked: the PIN was entered during this visit, so recordings may be shown
     private int padGen;
 
     private final Runnable tick = new Runnable() {
@@ -179,7 +179,6 @@ public class MainActivity extends Activity {
         setContentView(outer);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         render();
-        if (lock.enabled()) showLock();
         ui.post(tick);
 
         IntentFilter filt = new IntentFilter(Updater.ACTION_RESULT);
@@ -203,24 +202,20 @@ public class MainActivity extends Activity {
     @Override
     protected void onStart() {
         super.onStart();
-        // Coming back from the background (or the screen turning off) asks for the PIN again,
-        // except after the system picker / permission dialog we opened ourselves.
-        boolean skip = externalUi;
         externalUi = false;
-        if (!skip && !locked && lock != null && lock.enabled()) showLock();
     }
 
     @Override
     protected void onPause() {
-        // Keep the app switcher thumbnail blank whenever a lock is set.
-        if (lock != null && lock.enabled()) getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        // Keep the app switcher thumbnail blank while recordings may be on screen.
+        if (lock != null && lock.enabled() && unlocked) getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         super.onPause();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        if (!locked) getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
         // A new day may have started (new week, new Parsha) while the app sat in the background.
         if (cur.s == Screen.HOME) render();
         RecordWidget.refreshAll(this);
@@ -241,6 +236,13 @@ public class MainActivity extends Activity {
             toast("Something went wrong saving; your earlier recordings are safe.");
         }
         stopPlayback();
+        // Leaving the app hides the recordings again (not after a picker/dialog the app opened itself).
+        if (!externalUi && unlocked) {
+            unlocked = false;
+            filesOpen = false;
+            hidePad();
+            if (cur.s == Screen.FOLDER) render();
+        }
     }
 
     @Override
@@ -253,7 +255,6 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (locked) { moveTaskToBack(true); return; }
         if (lockLayer != null && lockLayer.getVisibility() == View.VISIBLE) { hidePad(); return; }
         switch (cur.s) {
             case HOME: super.onBackPressed(); break;
@@ -558,7 +559,7 @@ public class MainActivity extends Activity {
         m.getMenu().add(0, 4, 6, lib.total() + " recordings  ·  v" + versionName()).setEnabled(false);
         m.setOnMenuItemClickListener(i -> {
             switch (i.getItemId()) {
-                case 1: startBackup(); break;
+                case 1: requireUnlock(this::startBackup); break;
                 case 2: startRestore(); break;
                 case 3:
                     israel = !israel;
@@ -947,7 +948,10 @@ public class MainActivity extends Activity {
         TextView files = text((filesOpen ? "Hide recordings" : "Recordings") + "  (" + recs.size() + ")", 17, C_ACCENT, true);
         files.setGravity(Gravity.CENTER);
         press(files, filesOpen ? C_SOFT : C_CARD, 16, C_ACCENT);
-        files.setOnClickListener(v -> { filesOpen = !filesOpen; stopPlayback(); render(); });
+        files.setOnClickListener(v -> {
+            if (filesOpen) { filesOpen = false; stopPlayback(); render(); }
+            else requireUnlock(() -> { filesOpen = true; stopPlayback(); render(); });
+        });
         page.addView(files, lp(-1, dp(54), 0, 16, 0, 16, 6));
 
         folderRows = null;
@@ -1105,9 +1109,7 @@ public class MainActivity extends Activity {
     private void recordNowIfAsked(Intent i, boolean freshLaunch) {
         if (recorder != null || cur.s == Screen.REVIEW) return;
         boolean shortcut = i != null && "com.parsharec.RECORD_NOW".equals(i.getAction());
-        if (!(shortcut || (freshLaunch && prefs.getBoolean("autoRecord", false)))) return;
-        if (locked) { pendingRecord = true; return; }   // the widget must not bypass the PIN; record right after unlock
-        startRecording(Catalog.currentKey(israel));
+        if (shortcut || (freshLaunch && prefs.getBoolean("autoRecord", false))) startRecording(Catalog.currentKey(israel));
     }
 
     @Override
@@ -1408,23 +1410,18 @@ public class MainActivity extends Activity {
 
     private interface PinCheck { String check(String pin); }
 
-    private void showLock() {
-        locked = true;
-        stopPlayback();
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
-        showPinPad("Parsha Recorder", "Enter your PIN", false, pin -> {
+    /** Runs {@code then} right away if recordings are open to the user, otherwise after the correct PIN. */
+    private void requireUnlock(Runnable then) {
+        if (!lock.enabled() || unlocked) { then.run(); return; }
+        showPinPad("Recordings are locked", "Enter your PIN to see them", true, pin -> {
             long w = lock.waitMs();
             if (w > 0) return "Too many wrong tries. Wait " + (w / 1000 + 1) + " seconds.";
             if (!lock.check(pin)) {
                 long w2 = lock.waitMs();
                 return w2 > 0 ? "Wrong PIN. Wait " + (w2 / 1000 + 1) + " seconds." : "Wrong PIN";
             }
-            locked = false;
-            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
-            if (pendingRecord) {
-                pendingRecord = false;
-                ui.post(() -> { if (recorder == null && cur.s != Screen.REVIEW) startRecording(Catalog.currentKey(israel)); });
-            }
+            unlocked = true;
+            ui.post(then);
             return null;
         });
     }
@@ -1438,7 +1435,7 @@ public class MainActivity extends Activity {
     private void lockSettings() {
         if (!lock.enabled()) {
             new AlertDialog.Builder(this).setTitle("Lock the app with a PIN")
-                    .setMessage("Pick a PIN of any length. The app asks for it every time it opens.\n\n"
+                    .setMessage("Pick a PIN of any length. Recording stays instant and needs no PIN, but seeing, playing or backing up recordings asks for it.\n\n"
                             + "There is no \"forgot PIN\". If it is lost, the only way back in is to clear the app's data "
                             + "or reinstall, which erases the recordings stored inside the app. Back up first.")
                     .setPositiveButton("Set a PIN", (d, w) -> setNewPin())
