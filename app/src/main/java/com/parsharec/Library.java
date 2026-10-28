@@ -101,18 +101,24 @@ public final class Library {
 
     private void remirror(Rec r) {
         if (r.mirror == null || r.mirror.isEmpty()) return;
-        r.mirror = Mirror.update(ctx, r.mirror, Catalog.title(r.folder), displayName(r));
+        r.mirror = Mirror.update(ctx, r.mirror, Catalog.path(r.folder), displayName(r));
     }
 
     /** Creates the file-manager copy for every recording that lacks one. Safe to call repeatedly; run off the main thread. */
     public synchronized void syncMirrors() {
         boolean changed = false;
+        // One-time move of copies made by 1.1-1.3 (Music/Parsha Recorder/<name>) into the new Parsha/Yom Tov/Gemara layout.
+        android.content.SharedPreferences sp = ctx.getSharedPreferences("prefs", Context.MODE_PRIVATE);
+        if (sp.getInt("mirrorLayout", 1) < 2) {
+            for (Rec r : recs) if (r.mirror != null && !r.mirror.isEmpty()) { remirror(r); changed = true; }
+            sp.edit().putInt("mirrorLayout", 2).apply();
+        }
         for (Rec r : recs) {
             if (r.mirror != null && !r.mirror.isEmpty()) continue;
             File f = audioFile(r.id);
             if (!f.exists()) continue;
             try {
-                r.mirror = Mirror.create(ctx, f, Catalog.title(r.folder), displayName(r));
+                r.mirror = Mirror.create(ctx, f, Catalog.path(r.folder), displayName(r));
                 changed = true;
             } catch (IOException | RuntimeException e) {
                 // Most likely storage permission on old Android; try again next launch.

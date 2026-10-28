@@ -23,7 +23,7 @@ public class RecordWidget extends AppWidgetProvider {
 
     private static RemoteViews build(Context c) {
         boolean israel = c.getSharedPreferences("prefs", Context.MODE_PRIVATE).getBoolean("israel", false);
-        Catalog.Folder f = Catalog.get(Catalog.currentKey(israel));
+        Catalog.Folder f = Catalog.getOrGeneral(Catalog.currentKey(israel));
         RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.widget_record);
         v.setTextViewText(R.id.widget_name, f.en);
         v.setTextViewText(R.id.widget_hebrew, f.he);

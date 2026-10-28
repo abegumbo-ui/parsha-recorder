@@ -28,7 +28,18 @@ final class Mirror {
         return t.isEmpty() ? "Recording" : t;
     }
 
-    private static String relPath(String folder) { return "Music/" + ROOT + "/" + clean(folder) + "/"; }
+    /** Folder may be a nested path like "Gemara/Berachos/Daf 005"; each segment is cleaned separately. */
+    private static String relPath(String folder) {
+        StringBuilder sb = new StringBuilder("Music/" + ROOT + "/");
+        for (String seg : folder.split("/")) if (!seg.trim().isEmpty()) sb.append(clean(seg)).append("/");
+        return sb.toString();
+    }
+
+    private static File dirFor(String folder) {
+        File d = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), ROOT);
+        for (String seg : folder.split("/")) if (!seg.trim().isEmpty()) d = new File(d, clean(seg));
+        return d;
+    }
 
     static String create(Context c, File src, String folder, String name) throws IOException {
         String file = clean(name) + ".m4a";
@@ -52,7 +63,7 @@ final class Mirror {
             cr.update(uri, done, null, null);
             return uri.toString();
         }
-        File dir = new File(new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), ROOT), clean(folder));
+        File dir = dirFor(folder);
         dir.mkdirs();
         File dst = unique(new File(dir, file));
         try (OutputStream os = new java.io.FileOutputStream(dst); FileInputStream in = new FileInputStream(src)) {
@@ -74,7 +85,7 @@ final class Mirror {
                 return ref;
             }
             File old = new File(ref);
-            File dir = new File(new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), ROOT), clean(folder));
+            File dir = dirFor(folder);
             dir.mkdirs();
             File dst = unique(new File(dir, file));
             if (old.renameTo(dst)) {
