@@ -122,6 +122,12 @@ public class MainActivity extends Activity {
 
     private Library.Rec copyRec;
 
+    // app lock
+    private AppLock lock;
+    private FrameLayout outer, lockLayer;
+    private boolean locked, externalUi, pendingRecord;
+    private int padGen;
+
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             try {
@@ -167,9 +173,13 @@ public class MainActivity extends Activity {
                     in.getSystemWindowInsetBottom());
             return in;
         });
-        setContentView(root);
+        lock = new AppLock(prefs);
+        outer = new FrameLayout(this);
+        outer.addView(root, new FrameLayout.LayoutParams(-1, -1));
+        setContentView(outer);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         render();
+        if (lock.enabled()) showLock();
         ui.post(tick);
 
         IntentFilter filt = new IntentFilter(Updater.ACTION_RESULT);
@@ -191,8 +201,26 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        // Coming back from the background (or the screen turning off) asks for the PIN again,
+        // except after the system picker / permission dialog we opened ourselves.
+        boolean skip = externalUi;
+        externalUi = false;
+        if (!skip && !locked && lock != null && lock.enabled()) showLock();
+    }
+
+    @Override
+    protected void onPause() {
+        // Keep the app switcher thumbnail blank whenever a lock is set.
+        if (lock != null && lock.enabled()) getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        super.onPause();
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
+        if (!locked) getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
         // A new day may have started (new week, new Parsha) while the app sat in the background.
         if (cur.s == Screen.HOME) render();
         RecordWidget.refreshAll(this);
@@ -225,6 +253,8 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (locked) { moveTaskToBack(true); return; }
+        if (lockLayer != null && lockLayer.getVisibility() == View.VISIBLE) { hidePad(); return; }
         switch (cur.s) {
             case HOME: super.onBackPressed(); break;
             case RECORDING: if (finishRecording()) showReview(); else leaveRecording(); break;
@@ -523,8 +553,9 @@ public class MainActivity extends Activity {
         m.getMenu().add(0, 3, 2, israel ? "Calendar: Israel (tap for Diaspora)" : "Calendar: Diaspora (tap for Israel)");
         m.getMenu().add(0, 6, 3, prefs.getBoolean("autoRecord", false)
                 ? "Record as soon as the app opens: ON" : "Record as soon as the app opens: off");
-        m.getMenu().add(0, 5, 4, "Check for updates");
-        m.getMenu().add(0, 4, 5, lib.total() + " recordings  ·  v" + versionName()).setEnabled(false);
+        m.getMenu().add(0, 7, 4, lock.enabled() ? "App lock: ON (PIN)…" : "App lock (PIN)…");
+        m.getMenu().add(0, 5, 5, "Check for updates");
+        m.getMenu().add(0, 4, 6, lib.total() + " recordings  ·  v" + versionName()).setEnabled(false);
         m.setOnMenuItemClickListener(i -> {
             switch (i.getItemId()) {
                 case 1: startBackup(); break;
@@ -535,6 +566,7 @@ public class MainActivity extends Activity {
                     render();
                     break;
                 case 5: checkForUpdate(true); break;
+                case 7: lockSettings(); break;
                 case 6:
                     prefs.edit().putBoolean("autoRecord", !prefs.getBoolean("autoRecord", false)).apply();
                     toast(prefs.getBoolean("autoRecord", false) ? "The app will start recording this week's Parsha as soon as it opens." : "Auto-record off.");
@@ -1073,7 +1105,9 @@ public class MainActivity extends Activity {
     private void recordNowIfAsked(Intent i, boolean freshLaunch) {
         if (recorder != null || cur.s == Screen.REVIEW) return;
         boolean shortcut = i != null && "com.parsharec.RECORD_NOW".equals(i.getAction());
-        if (shortcut || (freshLaunch && prefs.getBoolean("autoRecord", false))) startRecording(Catalog.currentKey(israel));
+        if (!(shortcut || (freshLaunch && prefs.getBoolean("autoRecord", false)))) return;
+        if (locked) { pendingRecord = true; return; }   // the widget must not bypass the PIN; record right after unlock
+        startRecording(Catalog.currentKey(israel));
     }
 
     @Override
@@ -1370,19 +1404,181 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ backup / restore / copy
 
+    // ------------------------------------------------------------------ APP LOCK
+
+    private interface PinCheck { String check(String pin); }
+
+    private void showLock() {
+        locked = true;
+        stopPlayback();
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        showPinPad("Parsha Recorder", "Enter your PIN", false, pin -> {
+            long w = lock.waitMs();
+            if (w > 0) return "Too many wrong tries. Wait " + (w / 1000 + 1) + " seconds.";
+            if (!lock.check(pin)) {
+                long w2 = lock.waitMs();
+                return w2 > 0 ? "Wrong PIN. Wait " + (w2 / 1000 + 1) + " seconds." : "Wrong PIN";
+            }
+            locked = false;
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+            if (pendingRecord) {
+                pendingRecord = false;
+                ui.post(() -> { if (recorder == null && cur.s != Screen.REVIEW) startRecording(Catalog.currentKey(israel)); });
+            }
+            return null;
+        });
+    }
+
+    private void hidePad() {
+        if (lockLayer == null) return;
+        lockLayer.setVisibility(View.GONE);
+        lockLayer.removeAllViews();
+    }
+
+    private void lockSettings() {
+        if (!lock.enabled()) {
+            new AlertDialog.Builder(this).setTitle("Lock the app with a PIN")
+                    .setMessage("Pick a PIN of any length. The app asks for it every time it opens.\n\n"
+                            + "There is no \"forgot PIN\". If it is lost, the only way back in is to clear the app's data "
+                            + "or reinstall, which erases the recordings stored inside the app. Back up first.")
+                    .setPositiveButton("Set a PIN", (d, w) -> setNewPin())
+                    .setNegativeButton("Cancel", null).show();
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle("App lock is on")
+                .setItems(new String[]{"Change PIN", "Turn lock off"}, (d, w) -> {
+                    boolean off = w == 1;
+                    showPinPad(off ? "Turn lock off" : "Change PIN", "Enter your current PIN", true, pin -> {
+                        long wait = lock.waitMs();
+                        if (wait > 0) return "Too many wrong tries. Wait " + (wait / 1000 + 1) + " seconds.";
+                        if (!lock.check(pin)) return "Wrong PIN";
+                        if (off) { lock.clear(); toast("App lock is off."); }
+                        else setNewPin();
+                        return null;
+                    });
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void setNewPin() {
+        showPinPad("Choose a PIN", "Any number of digits", true, first -> {
+            showPinPad("Confirm PIN", "Enter it again", true, again -> {
+                if (!again.equals(first)) return "Does not match. Try again.";
+                lock.set(first);
+                toast("PIN set. The app will ask for it next time it opens.");
+                return null;
+            });
+            return null;
+        });
+    }
+
+    /** Full-screen digit pad. {@code check} returns an error to show, or null to accept (which closes the pad unless it opened another). */
+    private void showPinPad(String title, String sub, boolean cancellable, PinCheck check) {
+        final int gen = ++padGen;
+        if (lockLayer == null) {
+            lockLayer = new FrameLayout(this);
+            lockLayer.setBackgroundColor(C_BG);
+            lockLayer.setClickable(true);
+            lockLayer.setOnApplyWindowInsetsListener((v, in) -> {
+                v.setPadding(in.getSystemWindowInsetLeft(), in.getSystemWindowInsetTop(), in.getSystemWindowInsetRight(),
+                        in.getSystemWindowInsetBottom());
+                return in;
+            });
+            outer.addView(lockLayer, new FrameLayout.LayoutParams(-1, -1));
+        }
+        lockLayer.removeAllViews();
+        lockLayer.setVisibility(View.VISIBLE);
+
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        int keyH = Math.max(dp(40), Math.min(dp(64), (dm.heightPixels - dp(300)) / 4));
+        int colW = Math.min(dp(320), dm.widthPixels - dp(32));
+
+        StringBuilder entry = new StringBuilder();
+        LinearLayout col = vbox();
+        col.setGravity(Gravity.CENTER_HORIZONTAL);
+        TextView t = text(title, 24, C_INK, true);
+        t.setGravity(Gravity.CENTER);
+        col.addView(t, lp(-1, -2, 0, 0, 8, 0, 4));
+        TextView s = text(sub, 15, C_SUB, false);
+        s.setGravity(Gravity.CENTER);
+        col.addView(s, lp(-1, -2, 0, 0, 0, 0, 10));
+        TextView dots = text("", 28, C_ACCENT, true);
+        dots.setGravity(Gravity.CENTER);
+        dots.setMinHeight(dp(44));
+        col.addView(dots, lp(-1, -2, 0, 0, 0, 0, 0));
+        TextView msg = text("", 14, C_RED, false);
+        msg.setGravity(Gravity.CENTER);
+        msg.setMinHeight(dp(24));
+        col.addView(msg, lp(-1, -2, 0, 0, 0, 0, 8));
+
+        Runnable redraw = () -> {
+            StringBuilder d = new StringBuilder();
+            for (int i = 0; i < entry.length(); i++) d.append(i == 0 ? "●" : " ●");
+            dots.setText(d);
+        };
+        Runnable submit = () -> {
+            if (entry.length() == 0) return;
+            String err;
+            try { err = check.check(entry.toString()); } catch (RuntimeException e) { err = "Something went wrong"; }
+            if (err != null) {
+                msg.setText(err);
+                entry.setLength(0);
+                redraw.run();
+            } else if (padGen == gen) {
+                hidePad();
+            }
+        };
+
+        String[][] rows = {{"1", "2", "3"}, {"4", "5", "6"}, {"7", "8", "9"}, {"⌫", "0", "OK"}};
+        for (String[] row : rows) {
+            LinearLayout h = hbox();
+            for (String k : row) {
+                TextView key = text(k, k.length() > 1 ? 18 : 24, k.equals("OK") ? 0xFFFFFFFF : C_INK, true);
+                key.setGravity(Gravity.CENTER);
+                press(key, k.equals("OK") ? C_ACCENT : C_CARD, 14, k.equals("OK") ? 0 : C_LINE);
+                key.setOnClickListener(v -> {
+                    msg.setText("");
+                    if (k.equals("OK")) { submit.run(); return; }
+                    if (k.equals("⌫")) { if (entry.length() > 0) entry.setLength(entry.length() - 1); }
+                    else if (entry.length() < AppLock.MAX_LEN) entry.append(k);
+                    redraw.run();
+                });
+                if (k.equals("⌫")) key.setOnLongClickListener(v -> { entry.setLength(0); redraw.run(); return true; });
+                h.addView(key, lp(0, keyH, 1, 5, 5, 5, 5));
+            }
+            col.addView(h, lp(-1, -2, 0, 0, 0, 0, 0));
+        }
+        if (cancellable) {
+            TextView c = text("Cancel", 16, C_SUB, true);
+            c.setGravity(Gravity.CENTER);
+            c.setPadding(dp(16), dp(12), dp(16), dp(12));
+            c.setOnClickListener(v -> hidePad());
+            col.addView(c, lp(-2, -2, 0, 0, 8, 0, 0));
+        }
+        ScrollView sv = new ScrollView(this);
+        sv.setFillViewport(true);
+        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(colW, -2, Gravity.CENTER_HORIZONTAL);
+        FrameLayout wrap = new FrameLayout(this);
+        wrap.addView(col, cp);
+        sv.addView(wrap, new FrameLayout.LayoutParams(-1, -2));
+        lockLayer.addView(sv, new FrameLayout.LayoutParams(-1, -1));
+    }
+
     private void startBackup() {
+        externalUi = true;
         Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip");
         i.putExtra(Intent.EXTRA_TITLE, "ParshaRecorder-backup-" + new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date()) + ".zip");
         startActivityForResult(i, REQ_BACKUP);
     }
 
     private void startRestore() {
+        externalUi = true;
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
         i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/zip", "application/x-zip-compressed", "application/octet-stream"});
         startActivityForResult(i, REQ_RESTORE);
     }
 
     private void startCopy(Library.Rec r) {
+        externalUi = true;
         copyRec = r;
         Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("audio/mp4");
         i.putExtra(Intent.EXTRA_TITLE, (Catalog.title(r.folder) + " " + titleOf(r)).replaceAll("[\\\\/:*?\"<>|]", "-") + ".m4a");
