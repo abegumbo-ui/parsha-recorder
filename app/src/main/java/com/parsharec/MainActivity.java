@@ -669,12 +669,15 @@ public class MainActivity extends Activity {
             for (Object o : rows) body.addView(rowView((TileRow) o));
         }
 
-        body.addView(sectionTitle("Anything else"));
-        Tile gen = tile("g_general", "General thoughts", "כללי", counts.containsKey("g_general") ? counts.get("g_general") : 0, false,
-                v -> go(Screen.FOLDER, "g_general"));
+        body.addView(sectionTitle("Simchas and anything else"));
+        List<Tile> others = new ArrayList<>();
+        for (String k : new String[]{"g_barmitzvah", "g_chasunah", "g_general"}) {
+            Catalog.Folder f = Catalog.get(k);
+            others.add(tile(k, f.en, f.he, counts.containsKey(k) ? counts.get(k) : 0, false, v -> go(Screen.FOLDER, k)));
+        }
         List<Object> grow = new ArrayList<>();
-        chunk(grow, java.util.Collections.singletonList(gen), false);
-        body.addView(rowView((TileRow) grow.get(0)));
+        chunk(grow, others, false);
+        for (Object o : grow) body.addView(rowView((TileRow) o));
         setScreen(page);
     }
 
@@ -1073,7 +1076,7 @@ public class MainActivity extends Activity {
 
     /** Folder chooser that mirrors the app: Parsha / Yom Tov / Gemara (masechta, then daf) / General. */
     private void pickFolder(String title, Str done) {
-        String[] top = {"Parsha", "Yom Tov", "Gemara", "General thoughts"};
+        String[] top = {"Parsha", "Yom Tov", "Gemara", "Bar Mitzvah, Chasunah, General"};
         new AlertDialog.Builder(this).setTitle(title).setItems(top, (d, w) -> {
             if (w == 0) {
                 List<Catalog.Folder> list = new ArrayList<>();
@@ -1093,7 +1096,7 @@ public class MainActivity extends Activity {
                             .setItems(dapim, (d3, k) -> done.got(Catalog.dafKey(m.idx, m.firstDaf + k)))
                             .setNegativeButton("Cancel", null).show();
                 }).setNegativeButton("Cancel", null).show();
-            } else done.got("g_general");
+            } else chooseFrom(title, Catalog.inSection(Catalog.SEC_GENERAL), done);
         }).setNegativeButton("Cancel", null).show();
     }
 

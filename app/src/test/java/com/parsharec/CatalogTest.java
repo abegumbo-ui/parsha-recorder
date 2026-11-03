@@ -106,5 +106,8 @@ public class CatalogTest {
         assertEquals("Yom Tov/Pesach", Catalog.path("h_pesach"));
         assertEquals("Gemara/Berachos/Daf 005", Catalog.path(Catalog.dafKey(0, 5)));
         assertEquals("General", Catalog.path("g_general"));
+        assertEquals("Bar Mitzvah", Catalog.path("g_barmitzvah"));
+        assertEquals("Chasunah & Sheva Brachos", Catalog.path("g_chasunah"));
+        assertEquals("Bar Mitzvah", Catalog.location("g_barmitzvah"));
     }
 }

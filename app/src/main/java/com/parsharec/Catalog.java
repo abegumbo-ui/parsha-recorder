@@ -96,6 +96,8 @@ public final class Catalog {
         add("h_shavuot", "Shavuos", "שבועות", SEC_HOLIDAY);
         add("h_tammuz17", "17 Tammuz & the Three Weeks", "י״ז בתמוז", SEC_HOLIDAY);
         add("h_tisha", "Tisha B'Av", "תשעה באב", SEC_HOLIDAY);
+        add("g_barmitzvah", "Bar Mitzvah", "בר מצווה", SEC_GENERAL);
+        add("g_chasunah", "Chasunah & Sheva Brachos", "חתונה ושבע ברכות", SEC_GENERAL);
         add("g_general", "General thoughts", "כללי", SEC_GENERAL);
 
         Object[][] s = {
@@ -208,7 +210,7 @@ public final class Catalog {
             String[] p = f.key.split("_");
             return "Gemara/" + m.en + "/Daf " + String.format(java.util.Locale.US, "%03d", Integer.parseInt(p[2]));
         }
-        return "General";
+        return "g_general".equals(f.key) ? "General" : f.en;
     }
 
     private static String hebNum(int n) {
