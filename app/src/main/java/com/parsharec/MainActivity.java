@@ -643,11 +643,21 @@ public class MainActivity extends Activity {
         cats.add(bigCard("Parsha", "פרשה", "All the parshiyos, Bereishis to Devarim", nP, v -> go(Screen.CATEGORY, Catalog.CAT_PARSHA)));
         cats.add(bigCard("Yom Tov", "יום טוב", "Yomim tovim, fasts and special days", nY, v -> go(Screen.CATEGORY, Catalog.CAT_YOMTOV)));
         cats.add(bigCard("Gemara", "גמרא", "Every masechta, every daf", nG, v -> go(Screen.CATEGORY, Catalog.CAT_GEMARA)));
+        int nBar = counts.containsKey("g_barmitzvah") ? counts.get("g_barmitzvah") : 0;
+        int nWed = counts.containsKey("g_chasunah") ? counts.get("g_chasunah") : 0;
+        cats.add(bigCard("Bar Mitzvah", "בר מצווה", "Record a thought for the bar mitzvah", nBar, v -> go(Screen.FOLDER, "g_barmitzvah")));
+        cats.add(bigCard("Chasunah & Sheva Brachos", "חתונה ושבע ברכות", "Wedding and Sheva Brachos", nWed, v -> go(Screen.FOLDER, "g_chasunah")));
         if (widthDp() >= 700) {
-            LinearLayout r = hbox();
-            r.setBaselineAligned(false);
-            for (int i = 0; i < cats.size(); i++) r.addView(cats.get(i), lp(0, -1, 1, i == 0 ? 0 : 5, 0, i == cats.size() - 1 ? 0 : 5, 0));
-            body.addView(r);
+            // Three cards per row; the last row is padded with empty space so the cards keep the same width.
+            for (int s = 0; s < cats.size(); s += 3) {
+                LinearLayout r = hbox();
+                r.setBaselineAligned(false);
+                for (int i = 0; i < 3; i++) {
+                    View c = s + i < cats.size() ? cats.get(s + i) : new View(this);
+                    r.addView(c, lp(0, s + i < cats.size() ? -1 : 0, 1, i == 0 ? 0 : 5, 0, i == 2 ? 0 : 5, 0));
+                }
+                body.addView(r, lp(-1, -2, 0, 0, 0, 0, s + 3 < cats.size() ? 8 : 0));
+            }
         } else {
             for (View c : cats) body.addView(c, lp(-1, -2, 0, 0, 4, 0, 4));
         }
@@ -669,15 +679,12 @@ public class MainActivity extends Activity {
             for (Object o : rows) body.addView(rowView((TileRow) o));
         }
 
-        body.addView(sectionTitle("Simchas and anything else"));
-        List<Tile> others = new ArrayList<>();
-        for (String k : new String[]{"g_barmitzvah", "g_chasunah", "g_general"}) {
-            Catalog.Folder f = Catalog.get(k);
-            others.add(tile(k, f.en, f.he, counts.containsKey(k) ? counts.get(k) : 0, false, v -> go(Screen.FOLDER, k)));
-        }
+        body.addView(sectionTitle("Anything else"));
+        Tile gen = tile("g_general", "General thoughts", "כללי", counts.containsKey("g_general") ? counts.get("g_general") : 0, false,
+                v -> go(Screen.FOLDER, "g_general"));
         List<Object> grow = new ArrayList<>();
-        chunk(grow, others, false);
-        for (Object o : grow) body.addView(rowView((TileRow) o));
+        chunk(grow, java.util.Collections.singletonList(gen), false);
+        body.addView(rowView((TileRow) grow.get(0)));
         setScreen(page);
     }
 
