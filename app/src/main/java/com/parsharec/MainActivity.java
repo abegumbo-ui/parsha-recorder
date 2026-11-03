@@ -492,6 +492,17 @@ public class MainActivity extends Activity {
         if (t.he != null && !t.he.isEmpty()) names.addView(text(t.he, 15, C_SUB, false));
         if (t.count > 0) names.addView(text(t.count + (t.count == 1 ? " recording" : " recordings"), 12, C_ACCENT, false));
         v.addView(names, lp(0, -2, 1, 0, 0, 6, 0));
+        if (prefs.getBoolean("tileRecord", false) && t.key != null && Catalog.get(t.key) != null) {
+            // Red button: record straight into this folder. Tapping anywhere else on the tile opens it as usual.
+            FrameLayout rb = new FrameLayout(this);
+            rb.setBackground(shape(C_RED, 22, 0, 0));
+            View dot = new View(this);
+            dot.setBackground(shape(0xFFFFFFFF, 7, 0, 0));
+            rb.addView(dot, new FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER));
+            rb.setOnClickListener(x -> startRecording(t.key));
+            rb.setContentDescription("Record " + t.en);
+            v.addView(rb, lp(dp(44), dp(44), 0, 0, 0, 8, 0));
+        }
         v.addView(new Glyph(this, Glyph.CHEVRON, C_SUB), lp(dp(22), dp(22), 0, 0, 0, 0, 0));
         v.setOnClickListener(t.click);
         v.setOnLongClickListener(t.longClick);
@@ -557,8 +568,10 @@ public class MainActivity extends Activity {
         m.getMenu().add(0, 7, 4, lock.enabled() ? "App lock: ON (PIN)…" : "App lock (PIN)…");
         m.getMenu().add(0, 8, 5, prefs.getBoolean("homeParshas", false)
                 ? "Home screen: all parshas (tap for categories)" : "Home screen: categories (tap for all parshas)");
-        m.getMenu().add(0, 5, 6, "Check for updates");
-        m.getMenu().add(0, 4, 7, lib.total() + " recordings  ·  v" + versionName()).setEnabled(false);
+        m.getMenu().add(0, 9, 6, prefs.getBoolean("tileRecord", false)
+                ? "Red record button on every folder: ON" : "Red record button on every folder: off");
+        m.getMenu().add(0, 5, 7, "Check for updates");
+        m.getMenu().add(0, 4, 8, lib.total() + " recordings  ·  v" + versionName()).setEnabled(false);
         m.setOnMenuItemClickListener(i -> {
             switch (i.getItemId()) {
                 case 1: requireUnlock(this::startBackup); break;
@@ -570,6 +583,10 @@ public class MainActivity extends Activity {
                     break;
                 case 5: checkForUpdate(true); break;
                 case 7: lockSettings(); break;
+                case 9:
+                    prefs.edit().putBoolean("tileRecord", !prefs.getBoolean("tileRecord", false)).apply();
+                    render();
+                    break;
                 case 8:
                     prefs.edit().putBoolean("homeParshas", !prefs.getBoolean("homeParshas", false)).apply();
                     render();
