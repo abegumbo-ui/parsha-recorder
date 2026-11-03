@@ -555,8 +555,10 @@ public class MainActivity extends Activity {
         m.getMenu().add(0, 6, 3, prefs.getBoolean("autoRecord", false)
                 ? "Record as soon as the app opens: ON" : "Record as soon as the app opens: off");
         m.getMenu().add(0, 7, 4, lock.enabled() ? "App lock: ON (PIN)…" : "App lock (PIN)…");
-        m.getMenu().add(0, 5, 5, "Check for updates");
-        m.getMenu().add(0, 4, 6, lib.total() + " recordings  ·  v" + versionName()).setEnabled(false);
+        m.getMenu().add(0, 8, 5, prefs.getBoolean("homeParshas", false)
+                ? "Home screen: all parshas (tap for categories)" : "Home screen: categories (tap for all parshas)");
+        m.getMenu().add(0, 5, 6, "Check for updates");
+        m.getMenu().add(0, 4, 7, lib.total() + " recordings  ·  v" + versionName()).setEnabled(false);
         m.setOnMenuItemClickListener(i -> {
             switch (i.getItemId()) {
                 case 1: requireUnlock(this::startBackup); break;
@@ -568,6 +570,10 @@ public class MainActivity extends Activity {
                     break;
                 case 5: checkForUpdate(true); break;
                 case 7: lockSettings(); break;
+                case 8:
+                    prefs.edit().putBoolean("homeParshas", !prefs.getBoolean("homeParshas", false)).apply();
+                    render();
+                    break;
                 case 6:
                     prefs.edit().putBoolean("autoRecord", !prefs.getBoolean("autoRecord", false)).apply();
                     toast(prefs.getBoolean("autoRecord", false) ? "The app will start recording this week's Parsha as soon as it opens." : "Auto-record off.");
@@ -640,7 +646,8 @@ public class MainActivity extends Activity {
         body.addView(sectionTitle("Browse"));
         int nP = total(counts, "p_"), nY = total(counts, "h_"), nG = total(counts, "d_");
         List<View> cats = new ArrayList<>();
-        cats.add(bigCard("Parsha", "פרשה", "All the parshiyos, Bereishis to Devarim", nP, v -> go(Screen.CATEGORY, Catalog.CAT_PARSHA)));
+        boolean allParshas = prefs.getBoolean("homeParshas", false);
+        if (!allParshas) cats.add(bigCard("Parsha", "פרשה", "All the parshiyos, Bereishis to Devarim", nP, v -> go(Screen.CATEGORY, Catalog.CAT_PARSHA)));
         cats.add(bigCard("Yom Tov", "יום טוב", "Yomim tovim, fasts and special days", nY, v -> go(Screen.CATEGORY, Catalog.CAT_YOMTOV)));
         cats.add(bigCard("Gemara", "גמרא", "Every masechta, every daf", nG, v -> go(Screen.CATEGORY, Catalog.CAT_GEMARA)));
         int nBar = counts.containsKey("g_barmitzvah") ? counts.get("g_barmitzvah") : 0;
@@ -660,6 +667,24 @@ public class MainActivity extends Activity {
             }
         } else {
             for (View c : cats) body.addView(c, lp(-1, -2, 0, 0, 4, 0, 4));
+        }
+
+        if (allParshas) {
+            // Every parsha straight on the home screen, grouped by sefer.
+            String now = Catalog.currentKey(israel);
+            for (String book : Catalog.BOOKS) {
+                body.addView(sectionTitle("Sefer " + book));
+                List<Tile> tiles = new ArrayList<>();
+                for (Catalog.Folder f : Catalog.inSection(book)) {
+                    Tile t = tile(f.key, f.en, f.he, counts.containsKey(f.key) ? counts.get(f.key) : 0, false, v -> go(Screen.FOLDER, f.key));
+                    t.highlight = f.key.equals(now);
+                    pinnable(t);
+                    tiles.add(t);
+                }
+                List<Object> prow = new ArrayList<>();
+                chunk(prow, tiles, false);
+                for (Object o : prow) body.addView(rowView((TileRow) o));
+            }
         }
 
         List<Tile> pinned = new ArrayList<>();
