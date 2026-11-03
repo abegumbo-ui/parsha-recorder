@@ -492,17 +492,9 @@ public class MainActivity extends Activity {
         if (t.he != null && !t.he.isEmpty()) names.addView(text(t.he, 15, C_SUB, false));
         if (t.count > 0) names.addView(text(t.count + (t.count == 1 ? " recording" : " recordings"), 12, C_ACCENT, false));
         v.addView(names, lp(0, -2, 1, 0, 0, 6, 0));
-        if (prefs.getBoolean("tileRecord", false) && t.key != null && Catalog.get(t.key) != null) {
-            // Red button: record straight into this folder. Tapping anywhere else on the tile opens it as usual.
-            FrameLayout rb = new FrameLayout(this);
-            rb.setBackground(shape(C_RED, 22, 0, 0));
-            View dot = new View(this);
-            dot.setBackground(shape(0xFFFFFFFF, 7, 0, 0));
-            rb.addView(dot, new FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER));
-            rb.setOnClickListener(x -> startRecording(t.key));
-            rb.setContentDescription("Record " + t.en);
-            v.addView(rb, lp(dp(44), dp(44), 0, 0, 0, 8, 0));
-        }
+        // Red button: record straight into this folder. Tapping anywhere else on the tile opens it as usual.
+        View rd = recordDot(t.key, t.en);
+        if (rd != null) v.addView(rd, lp(dp(44), dp(44), 0, 0, 0, 8, 0));
         v.addView(new Glyph(this, Glyph.CHEVRON, C_SUB), lp(dp(22), dp(22), 0, 0, 0, 0, 0));
         v.setOnClickListener(t.click);
         v.setOnLongClickListener(t.longClick);
@@ -687,8 +679,8 @@ public class MainActivity extends Activity {
         cats.add(bigCard("Gemara", "גמרא", "Every masechta, every daf", nG, v -> go(Screen.CATEGORY, Catalog.CAT_GEMARA)));
         int nBar = counts.containsKey("g_barmitzvah") ? counts.get("g_barmitzvah") : 0;
         int nWed = counts.containsKey("g_chasunah") ? counts.get("g_chasunah") : 0;
-        cats.add(bigCard("Bar Mitzvah", "בר מצווה", "Record a thought for the bar mitzvah", nBar, v -> go(Screen.FOLDER, "g_barmitzvah")));
-        cats.add(bigCard("Chasunah & Sheva Brachos", "חתונה ושבע ברכות", "Wedding and Sheva Brachos", nWed, v -> go(Screen.FOLDER, "g_chasunah")));
+        cats.add(bigCard("Bar Mitzvah", "בר מצווה", "Record a thought for the bar mitzvah", nBar, v -> go(Screen.FOLDER, "g_barmitzvah"), "g_barmitzvah"));
+        cats.add(bigCard("Chasunah & Sheva Brachos", "חתונה ושבע ברכות", "Wedding and Sheva Brachos", nWed, v -> go(Screen.FOLDER, "g_chasunah"), "g_chasunah"));
         if (widthDp() >= 700) {
             // Three cards per row; the last row is padded with empty space so the cards keep the same width.
             for (int s = 0; s < cats.size(); s += 3) {
@@ -736,7 +728,25 @@ public class MainActivity extends Activity {
         return t;
     }
 
+    /** Small red record button that starts recording into {@code key}, or null when the setting is off. */
+    private View recordDot(String key, String name) {
+        if (!prefs.getBoolean("tileRecord", false) || key == null || Catalog.get(key) == null) return null;
+        FrameLayout rb = new FrameLayout(this);
+        rb.setBackground(shape(C_RED, 22, 0, 0));
+        View dot = new View(this);
+        dot.setBackground(shape(0xFFFFFFFF, 7, 0, 0));
+        rb.addView(dot, new FrameLayout.LayoutParams(dp(14), dp(14), Gravity.CENTER));
+        rb.setOnClickListener(x -> startRecording(key));
+        rb.setContentDescription("Record " + name);
+        return rb;
+    }
+
     private View bigCard(String en, String he, String sub, int count, View.OnClickListener l) {
+        return bigCard(en, he, sub, count, l, null);
+    }
+
+    /** {@code recKey}: folder to show the optional red record button for (null for category cards). */
+    private View bigCard(String en, String he, String sub, int count, View.OnClickListener l, String recKey) {
         LinearLayout c = hbox();
         c.setPadding(dp(18), dp(16), dp(14), dp(16));
         press(c, C_CARD, 20, C_LINE);
@@ -746,6 +756,8 @@ public class MainActivity extends Activity {
         names.addView(text(sub, 13, C_SUB, false), lp(-2, -2, 0, 0, 4, 0, 0));
         if (count > 0) names.addView(text(count + (count == 1 ? " recording" : " recordings"), 13, C_ACCENT, true));
         c.addView(names, lp(0, -2, 1, 0, 0, 8, 0));
+        View rd = recordDot(recKey, en);
+        if (rd != null) c.addView(rd, lp(dp(48), dp(48), 0, 0, 0, 10, 0));
         c.addView(new Glyph(this, Glyph.CHEVRON, C_SUB), lp(dp(26), dp(26), 0, 0, 0, 0, 0));
         c.setOnClickListener(l);
         return c;
