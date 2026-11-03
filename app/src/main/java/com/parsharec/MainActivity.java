@@ -268,7 +268,47 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ navigation
 
+    // Scroll position of each list screen, so coming back lands where the user left (not at the top).
+    private final Map<String, int[]> scrollMem = new java.util.HashMap<>();
+
+    private static String scrollKey(Dest d) { return d.s + ":" + d.arg; }
+
+    private static View findScrollable(View v) {
+        if (v instanceof ScrollView || v instanceof ListView) return v;
+        if (v instanceof ViewGroup) {
+            ViewGroup g = (ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) {
+                View r = findScrollable(g.getChildAt(i));
+                if (r != null) return r;
+            }
+        }
+        return null;
+    }
+
+    private void saveScroll() {
+        if (cur.s == Screen.FOLDER || cur.s == Screen.RECORDING || cur.s == Screen.REVIEW) return;
+        View s = findScrollable(root);
+        if (s instanceof ScrollView) {
+            scrollMem.put(scrollKey(cur), new int[]{((ScrollView) s).getScrollY(), 0});
+        } else if (s instanceof ListView) {
+            ListView lv = (ListView) s;
+            View c = lv.getChildAt(0);
+            scrollMem.put(scrollKey(cur), new int[]{lv.getFirstVisiblePosition(), c == null ? 0 : c.getTop()});
+        }
+    }
+
+    private void restoreScroll() {
+        int[] m = scrollMem.remove(scrollKey(cur));
+        View s = findScrollable(root);
+        if (m == null || s == null) return;
+        s.post(() -> {
+            if (s instanceof ScrollView) s.scrollTo(0, m[0]);
+            else ((ListView) s).setSelectionFromTop(m[0], m[1]);
+        });
+    }
+
     private void go(Screen s, String arg) {
+        saveScroll();
         backStack.push(cur);
         while (backStack.size() > 40) backStack.removeLast();
         cur = new Dest(s, arg);
@@ -279,6 +319,7 @@ public class MainActivity extends Activity {
 
     private void goRoot(Screen s, String arg) {
         backStack.clear();
+        scrollMem.clear();
         cur = new Dest(s, arg);
         stopPlayback();
         render();
@@ -288,6 +329,7 @@ public class MainActivity extends Activity {
     private void render() {
         try {
             renderUnsafe();
+            restoreScroll();
         } catch (RuntimeException e) {
             try {
                 backStack.clear();
@@ -577,10 +619,12 @@ public class MainActivity extends Activity {
                 case 7: lockSettings(); break;
                 case 9:
                     prefs.edit().putBoolean("tileRecord", !prefs.getBoolean("tileRecord", false)).apply();
+                    saveScroll();
                     render();
                     break;
                 case 8:
                     prefs.edit().putBoolean("homeParshas", !prefs.getBoolean("homeParshas", false)).apply();
+                    scrollMem.clear();
                     render();
                     break;
                 case 6:
@@ -1214,7 +1258,7 @@ public class MainActivity extends Activity {
         accumMs = 0;
         segStart = SystemClock.elapsedRealtime();
         paused = false;
-        if (cur.s != Screen.RECORDING && cur.s != Screen.REVIEW) origin = cur;
+        if (cur.s != Screen.RECORDING && cur.s != Screen.REVIEW) { saveScroll(); origin = cur; }
         cur = new Dest(Screen.RECORDING, null);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         render();
