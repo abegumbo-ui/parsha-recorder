@@ -643,10 +643,28 @@ public class MainActivity extends Activity {
             for (View f : feature) body.addView(f, lp(-1, -2, 0, 0, 4, 0, 8));
         }
 
-        body.addView(sectionTitle("Browse"));
+        boolean allParshas = prefs.getBoolean("homeParshas", false);
+        if (allParshas) {
+            // Every parsha straight on the home screen, right after the quick cards, grouped by sefer.
+            String now = Catalog.currentKey(israel);
+            for (String book : Catalog.BOOKS) {
+                body.addView(sectionTitle("Sefer " + book));
+                List<Tile> tiles = new ArrayList<>();
+                for (Catalog.Folder f : Catalog.inSection(book)) {
+                    Tile t = tile(f.key, f.en, f.he, counts.containsKey(f.key) ? counts.get(f.key) : 0, false, v -> go(Screen.FOLDER, f.key));
+                    t.highlight = f.key.equals(now);
+                    pinnable(t);
+                    tiles.add(t);
+                }
+                List<Object> prow = new ArrayList<>();
+                chunk(prow, tiles, false);
+                for (Object o : prow) body.addView(rowView((TileRow) o));
+            }
+        }
+
+        body.addView(sectionTitle(allParshas ? "More" : "Browse"));
         int nP = total(counts, "p_"), nY = total(counts, "h_"), nG = total(counts, "d_");
         List<View> cats = new ArrayList<>();
-        boolean allParshas = prefs.getBoolean("homeParshas", false);
         if (!allParshas) cats.add(bigCard("Parsha", "פרשה", "All the parshiyos, Bereishis to Devarim", nP, v -> go(Screen.CATEGORY, Catalog.CAT_PARSHA)));
         cats.add(bigCard("Yom Tov", "יום טוב", "Yomim tovim, fasts and special days", nY, v -> go(Screen.CATEGORY, Catalog.CAT_YOMTOV)));
         cats.add(bigCard("Gemara", "גמרא", "Every masechta, every daf", nG, v -> go(Screen.CATEGORY, Catalog.CAT_GEMARA)));
@@ -667,24 +685,6 @@ public class MainActivity extends Activity {
             }
         } else {
             for (View c : cats) body.addView(c, lp(-1, -2, 0, 0, 4, 0, 4));
-        }
-
-        if (allParshas) {
-            // Every parsha straight on the home screen, grouped by sefer.
-            String now = Catalog.currentKey(israel);
-            for (String book : Catalog.BOOKS) {
-                body.addView(sectionTitle("Sefer " + book));
-                List<Tile> tiles = new ArrayList<>();
-                for (Catalog.Folder f : Catalog.inSection(book)) {
-                    Tile t = tile(f.key, f.en, f.he, counts.containsKey(f.key) ? counts.get(f.key) : 0, false, v -> go(Screen.FOLDER, f.key));
-                    t.highlight = f.key.equals(now);
-                    pinnable(t);
-                    tiles.add(t);
-                }
-                List<Object> prow = new ArrayList<>();
-                chunk(prow, tiles, false);
-                for (Object o : prow) body.addView(rowView((TileRow) o));
-            }
         }
 
         List<Tile> pinned = new ArrayList<>();
