@@ -63,7 +63,7 @@ import java.util.function.Function;
 public class MainActivity extends Activity {
     private static final int C_BG = 0xFFF7F3EA, C_CARD = 0xFFFFFFFF, C_INK = 0xFF1E2A3A, C_SUB = 0xFF6B7685,
             C_ACCENT = 0xFF23406B, C_RED = 0xFFD93025, C_LINE = 0xFFE4DDCC, C_SOFT = 0xFFEAF0F8;
-    private static final int REQ_MIC = 1, REQ_BACKUP = 2, REQ_RESTORE = 3, REQ_COPY = 4, REQ_STORAGE = 5;
+    private static final int REQ_MIC = 1, REQ_BACKUP = 2, REQ_RESTORE = 3, REQ_COPY = 4, REQ_STORAGE = 5, REQ_NOTIF = 6;
 
     private enum Screen { HOME, CALENDAR, CATEGORY, MASECHTA, FOLDER, RECORDING, REVIEW }
 
@@ -189,6 +189,7 @@ public class MainActivity extends Activity {
             requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQ_STORAGE);
         else syncMirrorsAsync();
         checkForUpdate(false);
+        NotifBar.refresh(this);   // brings the quick-record notification back if it was swiped away
         recordNowIfAsked(getIntent(), b == null);
     }
 
@@ -470,10 +471,40 @@ public class MainActivity extends Activity {
         t.longClick = v -> {
             PopupMenu m = new PopupMenu(this, v);
             m.getMenu().add(0, 1, 0, pins().contains(t.key) ? "Unpin from home" : "Pin to home");
-            m.setOnMenuItemClickListener(i -> { togglePin(t.key); return true; });
+            m.getMenu().add(0, 2, 1, NotifBar.has(this, t.key) ? "Remove from notification" : "Add to notification");
+            m.setOnMenuItemClickListener(i -> {
+                if (i.getItemId() == 2) toggleNotification(t.key); else togglePin(t.key);
+                return true;
+            });
             m.show();
             return true;
         };
+    }
+
+    private String pendingNotifKey;
+
+    private void toggleNotification(String key) {
+        if (NotifBar.has(this, key)) {
+            NotifBar.remove(this, key);
+            NotifBar.refresh(this);
+            toast("Removed from the notification.");
+        } else if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            pendingNotifKey = key;
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIF);
+        } else {
+            addToNotification(key);
+        }
+    }
+
+    private void addToNotification(String key) {
+        if (!NotifBar.add(this, key)) {
+            toast("The notification holds " + NotifBar.MAX + " folders. Long-press one of them and remove it first.");
+            return;
+        }
+        NotifBar.refresh(this);
+        toast(NotifBar.allowed(this)
+                ? "Added. Its red record button is now in your notifications, even on the lock screen."
+                : "Added, but notifications are turned off for this app in Android settings.");
     }
 
     private int colsFor(boolean compact) {
@@ -1217,7 +1248,9 @@ public class MainActivity extends Activity {
     private void recordNowIfAsked(Intent i, boolean freshLaunch) {
         if (recorder != null || cur.s == Screen.REVIEW) return;
         boolean shortcut = i != null && "com.parsharec.RECORD_NOW".equals(i.getAction());
-        if (shortcut || (freshLaunch && prefs.getBoolean("autoRecord", false))) startRecording(Catalog.currentKey(israel));
+        String folder = shortcut ? i.getStringExtra("folder") : null;   // set by the notification's red buttons
+        if (folder == null || Catalog.get(folder) == null) folder = Catalog.currentKey(israel);
+        if (shortcut || (freshLaunch && prefs.getBoolean("autoRecord", false))) startRecording(folder);
     }
 
     @Override
@@ -1267,6 +1300,11 @@ public class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] res) {
         if (code == REQ_STORAGE) syncMirrorsAsync();
+        if (code == REQ_NOTIF) {
+            if (pendingNotifKey != null && res.length > 0 && res[0] == PackageManager.PERMISSION_GRANTED) addToNotification(pendingNotifKey);
+            else toast("Notifications are blocked for this app, so the red button can't be shown. Allow them in Android settings.");
+            pendingNotifKey = null;
+        }
         if (code == REQ_MIC) {
             if (res.length > 0 && res[0] == PackageManager.PERMISSION_GRANTED && pendingFolder != null) startRecording(pendingFolder);
             else toast("Microphone permission is needed to record.");

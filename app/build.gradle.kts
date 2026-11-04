@@ -7,8 +7,8 @@ android {
         applicationId = "com.parsharec"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.10.2"
+        versionCode = 18
+        versionName = "1.11.0"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
